@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/kaltura">
+    <file alias="logo.svg">kaltura-logo.svg</file>
+  </qresource>
+</RCC>

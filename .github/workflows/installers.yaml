@@ -1,0 +1,89 @@
+name: Installers
+
+# Produces the two shipping artifacts:
+#   Windows -> Inno Setup .exe
+#   macOS   -> .dmg wrapping the signed .pkg
+#
+# macOS cannot be cross-built from Windows, so the DMG is produced here on a real
+# macOS runner. Run this workflow manually, or on a version tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake --preset windows-x64
+          cmake --build --preset windows-x64 --config RelWithDebInfo
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          # Inno Setup ships on the GitHub windows-2022 image.
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $iscc "/DSourceDir=$(Resolve-Path 'build_x64\RelWithDebInfo')" `
+                  "/DDataDir=$(Resolve-Path 'data')" `
+                  "build-aux\windows\installer.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*.exe
+
+  macos:
+    name: macOS DMG
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure and build
+        run: |
+          cmake --preset macos
+          cmake --build --preset macos --config RelWithDebInfo
+
+      # Without these secrets the package is built unsigned: it still installs, but
+      # Gatekeeper reports it as damaged rather than showing a security prompt.
+      - name: Package
+        env:
+          CODESIGN_IDENT: ${{ secrets.MACOS_SIGNING_APPLICATION_IDENTITY }}
+          CODESIGN_IDENT_INSTALLER: ${{ secrets.MACOS_SIGNING_INSTALLER_IDENTITY }}
+          CODESIGN_IDENT_USER: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
+          CODESIGN_IDENT_PASS: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+        run: |
+          ./.github/scripts/package-macos --config RelWithDebInfo
+
+      - name: Build DMG
+        env:
+          CODESIGN_IDENT: ${{ secrets.MACOS_SIGNING_APPLICATION_IDENTITY }}
+          CODESIGN_IDENT_USER: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
+          CODESIGN_IDENT_PASS: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+        run: |
+          chmod +x build-aux/macos/make-dmg.zsh
+          ./build-aux/macos/make-dmg.zsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
