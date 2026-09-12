@@ -278,7 +278,13 @@ void KalturaClient::runSearch(const QString &q, int stage)
 
 		     QVector<EntrySummary> out;
 		     const QJsonArray objects = obj.value(QStringLiteral("objects")).toArray();
-		     for (const QJsonValue &v : objects) {
+		     /*
+		      * By value, not by const reference: QJsonArray's iterator yields a
+		      * temporary QJsonValue, so binding it to a reference extends a
+		      * temporary. Clang diagnoses that as -Wrange-loop-bind-reference and
+		      * the macOS build runs -Werror; MSVC does not diagnose it at all.
+		      */
+		     for (const QJsonValue v : objects) {
 			     const QJsonObject o = v.toObject();
 			     EntrySummary s;
 			     s.id = strField(o, "id");
