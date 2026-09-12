@@ -21,7 +21,7 @@ jobs:
     name: Windows installer
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -45,18 +45,30 @@ jobs:
                   "/DDataDir=$(Resolve-Path 'data')" `
                   "build-aux\windows\installer.iss"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: dist/*.exe
 
   macos:
     name: macOS DMG
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      # OBS 31 requires the macOS 15.0 SDK (Xcode 16+). The macos-14 image ships
+      # Xcode 15.4 / SDK 14.5, which fails check_sdk_requirements outright. Select
+      # the newest Xcode present rather than trusting the image default.
+      - name: Select Xcode
+        run: |
+          ls /Applications | grep -i '^Xcode' || true
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "using ${latest}"
+          sudo xcode-select -s "${latest}/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
 
       - name: Configure and build
         run: |
@@ -83,7 +95,7 @@ jobs:
           chmod +x build-aux/macos/make-dmg.zsh
           ./build-aux/macos/make-dmg.zsh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-dmg
           path: dist/*.dmg
