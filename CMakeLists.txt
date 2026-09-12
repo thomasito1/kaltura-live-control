@@ -89,6 +89,15 @@ if(WIN32)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE advapi32)
 elseif(APPLE)
   target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/platform/Credentials_mac.mm)
+  # The Keychain backend uses __bridge_transfer to hand a CFTypeRef from
+  # SecItemCopyMatching over to ARC. That cast only exists under ARC - without
+  # -fobjc-arc clang rejects it ("casts have no effect when not using ARC"), which
+  # is what broke the macOS build. The template enables ARC nowhere, so scope it
+  # to this one file rather than changing the flags for the whole target.
+  set_source_files_properties(
+    src/platform/Credentials_mac.mm
+    PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+  )
   find_library(SECURITY_FRAMEWORK Security REQUIRED)
   find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${SECURITY_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
