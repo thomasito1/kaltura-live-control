@@ -25,10 +25,35 @@ jobs:
         with:
           submodules: recursive
 
+
+      # The dependency download is the only flaky part of this build: CMake fetches
+      # ~1 GB of obs-deps, Qt6 and OBS sources from GitHub releases, and a transient
+      # "SSL connect error" there fails the whole job. Caching .deps keyed on
+      # buildspec.json means that download happens once per dependency bump rather
+      # than on every run, which removes most of the exposure and cuts several
+      # minutes off the build.
+      - name: Cache OBS dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: ${{ runner.os }}-deps-${{ hashFiles('buildspec.json') }}
+          restore-keys: ${{ runner.os }}-deps-
+
       - name: Configure and build
         shell: pwsh
         run: |
-          cmake --preset windows-x64
+          # Retry only the configure step, which is what performs the downloads.
+          # Deliberately NOT setting CMAKE_TLS_VERIFY=0 - disabling certificate
+          # verification on a dependency fetch is a bad trade for a transient error.
+          $ok = $false
+          foreach ($attempt in 1..3) {
+            Write-Host "configure attempt $attempt of 3"
+            cmake --preset windows-x64
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "configure failed (exit $LASTEXITCODE); retrying in 15s"
+            Start-Sleep -Seconds 15
+          }
+          if (-not $ok) { throw "cmake configure failed after 3 attempts" }
           cmake --build --preset windows-x64 --config RelWithDebInfo
 
       - name: Build installer
@@ -70,9 +95,32 @@ jobs:
           xcodebuild -version
           xcrun --sdk macosx --show-sdk-version
 
+
+      # The dependency download is the only flaky part of this build: CMake fetches
+      # ~1 GB of obs-deps, Qt6 and OBS sources from GitHub releases, and a transient
+      # "SSL connect error" there fails the whole job. Caching .deps keyed on
+      # buildspec.json means that download happens once per dependency bump rather
+      # than on every run, which removes most of the exposure and cuts several
+      # minutes off the build.
+      - name: Cache OBS dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: ${{ runner.os }}-deps-${{ hashFiles('buildspec.json') }}
+          restore-keys: ${{ runner.os }}-deps-
+
       - name: Configure and build
         run: |
-          cmake --preset macos
+          for attempt in 1 2 3; do
+            echo "configure attempt ${attempt} of 3"
+            cmake --preset macos && break
+            if [ "${attempt}" = "3" ]; then
+              echo "cmake configure failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "configure failed; retrying in 15s"
+            sleep 15
+          done
           cmake --build --preset macos --config RelWithDebInfo
 
       # Without these secrets the package is built unsigned: it still installs, but
